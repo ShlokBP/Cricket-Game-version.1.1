@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Cricket Game - Batting & Bowling</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #1a252f;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #f1c40f;
+        }
+
+        #game-container {
+            width: 800px;
+            background-color: #2c3e50;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+        }
+
+        #scoreboard {
+            width: 100%;
+            background-color: #34495e;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .score-box {
+            text-align: center;
+        }
+
+        .score-box span {
+            color: #2ecc71;
+            font-size: 22px;
+        }
+
+        canvas {
+            background-color: #27ae60;
+            border-radius: 8px;
+            border: 4px solid #fff;
+        }
+
+        #controls {
+            width: 100%;
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #34495e;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        button {
+            background-color: #e67e22;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #d35400;
+        }
+
+        button:disabled {
+            background-color: #7f8c8d;
+            cursor: not-allowed;
+        }
+
+        select, input {
+            padding: 8px;
+            border-radius: 5px;
+            border: none;
+            font-size: 14px;
+        }
+
+        #commentary {
+            margin-top: 10px;
+            font-size: 16px;
+            color: #f39c12;
+            height: 24px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🏏 2D Mini Cricket</h1>
+
+    <div id="game-container">
+        <div id="scoreboard">
+            <div class="score-box">Innings: <span id="phase-text">1st (Batting)</span></div>
+            <div class="score-box">Score: <span id="runs">0</span>/<span id="wickets">0</span></div>
+            <div class="score-box">Overs: <span id="overs">0.0</span>/2.0</div>
+            <div class="score-box">Target: <span id="target">-</span></div>
+        </div>
+
+        <canvas id="field" width="760" height="400"></canvas>
+
+        <div id="commentary">Press START GAME to begin!</div>
+
+        <div id="controls">
+            <!-- Batting Controls -->
+            <div id="batting-controls" class="control-group">
+                <button id="btn-swing" onclick="swingBat()" disabled>SWING BAT (Space)</button>
+            </div>
+
+            <!-- Bowling Controls -->
+            <div id="bowling-controls" class="control-group" style="display: none;">
+                <label>Speed: 
+                    <select id="bowl-speed">
+                        <option value="slow">Slow</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="fast">Fast</option>
+                    </select>
+                </label>
+                <label>Swing: 
+                    <select id="bowl-swing">
+                        <option value="straight">Straight</option>
+                        <option value="left">In-Swing</option>
+                        <option value="right">Out-Swing</option>
+                    </select>
+                </label>
+                <button id="btn-bowl" onclick="bowlBall()">BOWL</button>
+            </div>
+
+            <button id="btn-start" onclick="startGame()">Start Game</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('field');
+        const ctx = canvas.getContext('2d');
+
+        // Game State Variables
+        let phase = 'BATTING'; // 'BATTING' or 'BOWLING'
+        let runs = 0;
+        let wickets = 0;
+        let ballsBowled = 0;
+        const MAX_BALLS = 12; // 2 Overs
+        let target = null;
+        let userScore = 0;
+        let aiScore = 0;
+        let isBallInMotion = false;
+        let isBatSwung = false;
+
+        // Game Objects
+        const pitch = { x: 300, y: 50, width: 160, height: 300 };
+        const stumpsTop = { x: 380, y: 70, width: 40 };
+        const stumpsBottom = { x: 380, y: 330, width: 40 };
+        
+        let ball = { x: 400, y: 100, vx: 0, vy: 0, radius: 8, active: false };
+        let batsman = { x: 400, y: 320, batAngle: 0, swinging: false };
+
+        // Key Listeners
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && phase === 'BATTING' && isBallInMotion && !isBatSwung) {
+                swingBat();
+            }
+        });
+
+        function updateUI() {
+            document.getElementById('runs').innerText = runs;
+            document.getElementById('wickets').innerText = wickets;
+            document.getElementById('overs').innerText = `${Math.floor(ballsBowled/6)}.${ballsBowled%6}`;
+            document.getElementById('target').innerText = target === null ? '-' : target;
+        }
+
+        function setCommentary(text) {
+            document.getElementById('commentary').innerText = text;
+        }
+
+        function startGame() {
+            runs = 0;
+            wickets = 0;
+            ballsBowled = 0;
+            target = null;
+            phase = 'BATTING';
+            document.getElementById('phase-text').innerText = "1st (Batting)";
+            document.getElementById('btn-start').style.display = 'none';
+            document.getElementById('batting-controls').style.display = 'flex';
+            document.getElementById('bowling-controls').style.display = 'none';
+            updateUI();
+            setCommentary("Match Started! Click SWING BAT or press SPACE when the ball approaches.");
+            resetPositions();
+            if(phase === 'BATTING') autoBowlAI();
+        }
+
+        function resetPositions() {
+            ball.x = 400;
+            ball.y = 80;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.active = false;
+            isBallInMotion = false;
+            isBatSwung = false;
+            batsman.swinging = false;
+            batsman.batAngle = 0;
+            draw();
+        }
+
+        // --- DRAWING FUNCTIONS ---
+        function draw() {
+            // Field (Grass)
+            ctx.fillStyle = '#27ae60';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Inner Boundary (Oval)
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(400, 200, 360, 180, 0, 0, 2 * Math.PI);
+            ctx.stroke();
+
+            // Pitch
+            ctx.fillStyle = '#d35400';
+            ctx.fillRect(pitch.x, pitch.y, pitch.width, pitch.height);
+
+            // Stumps
+            ctx.fillStyle = '#ffffff';
+            // Top Stumps (Bowler End)
+            ctx.fillRect(385, 60, 30, 6);
+            // Bottom Stumps (Batsman End)
+            ctx.fillRect(385, 334, 30, 6);
+
+            // Batsman
+            ctx.fillStyle = '#f1c40f';
+            ctx.beginPath();
+            ctx.arc(batsman.x, batsman.y, 12, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Bat
+            ctx.save();
+            ctx.translate(batsman.x + 10, batsman.y);
+            ctx.rotate(batsman.batAngle);
+            ctx.fillStyle = '#8e44ad';
+            ctx.fillRect(0, -5, 25, 10);
+            ctx.restore();
+
+            // Ball
+            if (ball.active || isBallInMotion) {
+                ctx.fillStyle = '#e74c3c';
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // --- BATTING PHASE LOGIC ---
+        function autoBowlAI() {
+            if (ballsBowled >= MAX_BALLS || wickets >= 3 || (target && runs >= target)) {
+                endInnings();
+                return;
+            }
+
+            document.getElementById('btn-swing').disabled = false;
+            setCommentary("Bowler is running in...");
+            
+            setTimeout(() => {
+                let speed = 4 + Math.random() * 4; 
+                let swing = (Math.random() - 0.5) * 1.5; 
+                ball.vx = swing;
+                ball.vy = speed;
+                ball.active = true;
+                isBallInMotion = true;
+                animateBall();
+            }, 1000);
+        }
+
+        function swingBat() {
+            if (!isBallInMotion || isBatSwung) return;
+            isBatSwung = true;
+            batsman.swinging = true;
+            batsman.batAngle = -Math.PI / 3; // Swing angle
+
+            document.getElementById('btn-swing').disabled = true;
+
+            // Distance check between Ball and Batsman
+            let dist = Math.hypot(ball.x - batsman.x, ball.y - batsman.y);
+
+            if (dist < 35) {
+                // Good Hit!
+                let hitPower = Math.random();
+                ball.vy = -(6 + Math.random() * 6);
+                ball.vx = (Math.random() - 0.5) * 10;
+
+                let scoreScored = 0;
+                if (hitPower > 0.7) scoreScored = 6;
+                else if (hitPower > 0.4) scoreScored = 4;
+                else if (hitPower > 0.2) scoreScored = 2;
+                else scoreScored = 1;
+
+                runs += scoreScored;
+                setCommentary(`SHOT! You scored ${scoreScored} run(s)! 🏏`);
+            } else if (dist < 65) {
+                // Edge / Mis-hit
+                ball.vy = -(2 + Math.random() * 3);
+                ball.vx = (Math.random() - 0.5) * 12;
+                setCommentary("Edge! Just 1 run.");
+                runs += 1;
+            } else {
+                setCommentary("Missed it completely!");
+            }
+        }
+
+        // --- BOWLING PHASE LOGIC ---
+        function bowlBall() {
+            if (isBallInMotion) return;
+
+            let speedType = document.getElementById('bowl-speed').value;
+            let swingType = document.getElementById('bowl-swing').value;
+            document.getElementById('btn-bowl').disabled = true;
+
+            let speed = 4;
+            if (speedType === 'medium') speed = 6;
+            if (speedType === 'fast') speed = 8;
+
+            let swing = 0;
+            if (swingType === 'left') swing = -1;
+            if (swingType === 'right') swing = 1;
+
+            ball.vx = swing;
+            ball.vy = speed;
+            ball.active = true;
+            isBallInMotion = true;
+
+            setCommentary("Ball bowled!");
+
+            // AI Batsman Logic
+            setTimeout(() => {
+                // AI swings with some randomness
+                if (Math.random() > 0.35) {
+                    let aiHit = Math.random();
+                    ball.vy = -(4 + Math.random() * 5);
+                    ball.vx = (Math.random() - 0.5) * 8;
+
+                    let aiRuns = 0;
+                    if (aiHit > 0.75) aiRuns = 6;
+                    else if (aiHit > 0.45) aiRuns = 4;
+                    else aiRuns = 2;
+
+                    runs += aiRuns;
+                    setCommentary(`AI hit the ball for ${aiRuns} runs!`);
+                } else {
+                    setCommentary("AI missed the shot!");
+                }
+            }, 30000 / (speed * 10)); // Time swing according to speed
+
+            animateBall();
+        }
+
+        // --- CORE GAME ENGINE ---
+        function animateBall() {
+            if (!isBallInMotion) return;
+
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Check Wicket / Bowled
+            if (ball.y >= 330 && ball.y <= 340 && ball.x >= 380 && ball.x <= 410 && !batsman.swinging) {
+                wickets++;
+                setCommentary("OUT! Bowled 'em! ☝️");
+                endBall();
+                return;
+            }
+
+            // Ball Out of Bounds / End of Delivery
+            if (ball.y < 0 || ball.y > 400 || ball.x < 0 || ball.x > 800) {
+                endBall();
+                return;
+            }
+
+            draw();
+            requestAnimationFrame(animateBall);
+        }
+
+        function endBall() {
+            isBallInMotion = false;
+            ballsBowled++;
+            updateUI();
+
+            setTimeout(() => {
+                // Check Innings/Match End
+                if (target && runs >= target) {
+                    endInnings();
+                    return;
+                }
+                
+                if (ballsBowled >= MAX_BALLS || wickets >= 3) {
+                    endInnings();
+                } else {
+                    resetPositions();
+                    if (phase === 'BATTING') autoBowlAI();
+                    else document.getElementById('btn-bowl').disabled = false;
+                }
+            }, 1500);
+        }
+
+        function endInnings() {
+            if (phase === 'BATTING') {
+                userScore = runs;
+                target = userScore + 1;
+                phase = 'BOWLING';
+
+                alert(`Innings Over! You scored ${userScore} runs. Target for AI is ${target} runs.`);
+
+                // Reset for 2nd Innings
+                runs = 0;
+                wickets = 0;
+                ballsBowled = 0;
+
+                document.getElementById('phase-text').innerText = "2nd (Bowling)";
+                document.getElementById('batting-controls').style.display = 'none';
+                document.getElementById('bowling-controls').style.display = 'flex';
+                document.getElementById('btn-bowl').disabled = false;
+                updateUI();
+                setCommentary("Select Speed & Swing, then click BOWL!");
+                resetPositions();
+            } else {
+                aiScore = runs;
+                let resultMessage = "";
+                if (aiScore >= target) {
+                    resultMessage = `AI Won the match! (AI: ${aiScore}, You: ${userScore})`;
+                } else if (userScore > aiScore) {
+                    resultMessage = `🎉 YOU WON THE MATCH! (You: ${userScore}, AI: ${aiScore})`;
+                } else {
+                    resultMessage = "Match Tied!";
+                }
+
+                setCommentary(resultMessage);
+                alert(`Game Over!\n${resultMessage}`);
+
+                // Reset Game Button
+                document.getElementById('btn-start').style.display = 'inline-block';
+                document.getElementById('btn-start').innerText = 'Play Again';
+                document.getElementById('bowling-controls').style.display = 'none';
+            }
+        }
+
+        // Initial Draw
+        draw();
+    </script>
+</body>
+</html>
